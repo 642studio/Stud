@@ -18,6 +18,7 @@ from backend.summarize import summarize_pending
 from backend.analyze import analyze_task
 from backend.chat import send_chat_message
 from backend.draft import draft_section
+from backend.review import review_document
 from backend import moodle_client, drive, pdf_builder
 from backend.moodle_client import get_itson_client
 
@@ -472,6 +473,19 @@ def post_draft(task_id: str, body: DraftBody):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"No se pudo redactar: {e}")
     return {"draft": draft}
+
+
+@app.post("/api/tasks/{task_id}/document/review")
+def post_review(task_id: str):
+    try:
+        result = review_document(task_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    except KeyError:
+        raise HTTPException(status_code=500, detail="Falta OPENAI_API_KEY en el .env del backend")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo revisar el avance: {e}")
+    return result
 
 
 def _build_task_pdf(task_id: str) -> bytes:

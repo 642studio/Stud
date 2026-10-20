@@ -22,9 +22,11 @@ de la plataforma, el logo institucional y los datos de portada se configuran des
   materia) que se autocompleta en cada tarea.
 - **Asistente de investigación**: chat por tarea con búsqueda web (vía la Responses API de
   OpenAI), con el material de la tarea como contexto.
-- **Escritorio**: espacio de trabajo por tarea — ves el resumen y lo que se pide, escribes el
-  contenido (con ayuda de la IA para redactar secciones), generas el PDF (portada + contenido)
-  y lo subes directo a Google Drive con un click.
+- **Escritorio**: espacio de trabajo por tarea pensado como asistente de punta a punta — ves el
+  resumen y lo que se pide, marcas el checklist, le pides al agente que redacte o te revise el
+  avance (sin que la IA "apruebe" nada, solo sugiere), generas el PDF (portada + contenido) y lo
+  subes directo a Google Drive con un click. Ver [`docs/ESCRITORIO_AGENTE.md`](docs/ESCRITORIO_AGENTE.md)
+  para el estado detallado de esta función (parcialmente en progreso).
 - **Google Drive**: conexión OAuth (restringible a un dominio institucional), con un visor de
   archivos completo (navegar carpetas, subir, crear carpetas, buscar, mover a la papelera).
 - **Dashboard**: resumen a simple vista, filtros por materia/fecha/tipo, tags visuales.
@@ -41,10 +43,11 @@ Estud/
 │   ├── summarize.py         Resumen + clasificación (tag) por tarea
 │   ├── analyze.py            Checklist generada desde el material real
 │   ├── doc_extract.py         Descarga/extrae texto (Drive, Docs, PDFs, adjuntos)
-│   ├── chat.py                 Asistente de investigación (chat + web search)
-│   ├── draft.py                 Redacción asistida para el Escritorio
-│   ├── pdf_builder.py            Genera el PDF (portada + contenido)
-│   └── drive.py                   OAuth y operaciones de Google Drive
+│   ├── chat.py                 Asistente de investigación (chat + web search + redacción)
+│   ├── draft.py                 Redacción asistida de una sola instrucción (endpoint viejo)
+│   ├── review.py                 Revisa el documento contra el checklist (sugerencia, no gate)
+│   ├── pdf_builder.py              Genera el PDF (portada + contenido)
+│   └── drive.py                     OAuth y operaciones de Google Drive
 ├── scraper/            Cliente de scraping de iVirtual (Moodle), reusable fuera del backend
 │   └── itson_moodle.py
 ├── frontend/            React + Vite
@@ -56,6 +59,8 @@ Estud/
 │       ├── Drive.jsx              Conexión y visor de Google Drive
 │       ├── Profile.jsx             Perfil: cuenta, portada, logo
 │       └── taskUtils.js              Constantes y helpers compartidos
+├── docs/
+│   └── ESCRITORIO_AGENTE.md   Plan y estado de "Escritorio como agente completo" (en progreso)
 ├── requirements.txt     Dependencias Python (backend)
 └── estud.db             SQLite local (no se versiona — contiene credenciales)
 ```
@@ -64,6 +69,38 @@ El backend mantiene una sesión de Moodle autenticada en memoria (re-login autom
 y persiste todo en una única base SQLite local: tareas, resúmenes, checklists, chat,
 credenciales (de iVirtual y de Google), configuración de portada, y los documentos que se
 redactan en el Escritorio.
+
+### Modelo de datos (`estud.db`, ver `backend/db.py`)
+
+| Tabla | Para qué |
+|---|---|
+| `tasks` | Una fila por tarea sincronizada: título/resumen/tag, `detail_json` (descripción+adjuntos+estado), `checklist_json`, `material_text` (texto real extraído de PDFs/Docs/adjuntos), `completed` |
+| `settings` | Fila única: datos de portada (nombre, matrícula, universidad, carrera, logo) |
+| `platform_credentials` | Credenciales de iVirtual por plataforma (hoy solo `itson_moodle`), editables desde Perfil |
+| `google_oauth` | Fila única: Client ID/Secret de Google, dominio permitido, refresh token, email conectado |
+| `course_professors` | Profesor guardado por materia, para la portada |
+| `chat_messages` | Historial del chat/asistente, por `task_id` |
+| `drive_links` | Archivos subidos a Drive desde una tarea (nombre + URL) |
+| `task_documents` | El contenido que el alumno redacta por tarea en el Escritorio |
+
+### API (`backend/main.py`)
+
+Agrupada por área; todas devuelven JSON salvo donde se indica.
+
+- **Tareas**: `GET/POST /api/tasks`, `.../complete`, `.../detail`, `.../analyze`,
+  `.../checklist/toggle`, `DELETE /api/tasks` (borra todo, usado al cambiar de cuenta)
+- **Sync e IA**: `POST /api/sync`, `POST /api/summarize`
+- **Escritorio**: `GET/PUT /api/tasks/{id}/document`, `POST .../document/draft` (instrucción
+  suelta), `POST .../document/review` (sugerencias vs. checklist), `GET .../document/pdf`
+  (PDF inline), `POST .../document/upload-drive`
+- **Asistente/chat**: `GET/POST /api/tasks/{id}/chat`
+- **Portada**: `GET /api/tasks/{id}/portada`, `POST .../portada/professor`
+- **Perfil**: `GET/PUT /api/profile`, `GET/PUT /api/settings`, `POST /api/settings/logo`,
+  `GET/PUT /api/settings/platform`
+- **Drive**: `GET /api/drive/status`, `PUT /api/settings/google`, `GET /api/drive/auth/start`,
+  `GET /api/drive/callback`, `POST /api/drive/disconnect`, `GET /api/drive/files`,
+  `POST /api/drive/files/upload`, `POST /api/drive/folders`, `DELETE /api/drive/files/{id}`,
+  y las versiones por tarea `GET/POST /api/tasks/{id}/drive`
 
 ## Requisitos
 
@@ -149,3 +186,6 @@ administrar archivos existentes, no solo los que la app crea.
 - La extracción de material (`doc_extract.py`) cubre Google Docs, archivos en Google Drive y
   adjuntos nativos de Moodle; no cubre todavía otros proveedores (OneDrive, Dropbox, etc.).
 - Un solo documento por tarea en el Escritorio (no hay versiones ni historial de redacción).
+- "Escritorio como agente completo" está **en progreso** — ver
+  [`docs/ESCRITORIO_AGENTE.md`](docs/ESCRITORIO_AGENTE.md) para el detalle exacto de qué falta
+  antes de seguir con cualquier otra cosa en esa pantalla.

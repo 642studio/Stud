@@ -30,9 +30,11 @@ def draft_section(task_id: str, instruction: str, current_content: str) -> str:
     if not task:
         raise ValueError("Tarea no encontrada")
 
-    detail = json.loads(task["detail_json"]) if task.get("detail_json") else {}
     checklist = json.loads(task["checklist_json"]) if task.get("checklist_json") else []
-    material = _strip_html(detail.get("description_html"))[:3000]
+    material = (task.get("material_text") or "").strip()[:4000]
+    if not material:
+        detail = json.loads(task["detail_json"]) if task.get("detail_json") else {}
+        material = _strip_html(detail.get("description_html"))[:3000]
     checklist_text = "\n".join(f"- {c['text']}" for c in checklist)
 
     client = _get_client()
@@ -45,7 +47,8 @@ def draft_section(task_id: str, instruction: str, current_content: str) -> str:
         f"Instrucción del alumno: {instruction}\n\n"
         "Redacta SOLO el texto nuevo que debe agregarse (no repitas lo que ya escribió ni "
         "agregues comentarios tipo 'aquí tienes'). Español, redacción clara y académica. "
-        "Usa **negrita** para términos clave si aplica, y separa párrafos con una línea en blanco."
+        "Usa **negrita** para términos clave si aplica, separa párrafos con una línea en blanco, "
+        "y usa bloques ```código``` cuando el contenido sea código."
     )
     resp = client.chat.completions.create(
         model=MODEL,

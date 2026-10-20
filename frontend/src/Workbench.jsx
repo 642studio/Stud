@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL, formatDue } from "./taskUtils";
 import PortadaPanel from "./PortadaPanel";
+import ChatPanel from "./ChatPanel";
 
 function cleanMaterialText(text) {
   if (!text) return "";
@@ -22,9 +23,8 @@ export default function Workbench({ tasks }) {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
-  const [instruction, setInstruction] = useState("");
-  const [drafting, setDrafting] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [review, setReview] = useState(null);
+  const [reviewing, setReviewing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [driveResult, setDriveResult] = useState(null);
   const [error, setError] = useState(null);
@@ -41,7 +41,7 @@ export default function Workbench({ tasks }) {
 
   useEffect(() => {
     if (!taskId) return;
-    setDraft("");
+    setReview(null);
     setDriveResult(null);
     setError(null);
 
@@ -82,6 +82,24 @@ export default function Workbench({ tasks }) {
       .finally(() => setAnalyzing(false));
   }
 
+  async function toggleChecklistItem(item) {
+    const next = !item.done;
+    setChecklist((prev) => prev.map((i) => (i.id === item.id ? { ...i, done: next } : i)));
+    try {
+      const res = await fetch(
+        `${API_URL}/api/tasks/${encodeURIComponent(taskId)}/checklist/toggle`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item_id: item.id, done: next }),
+        }
+      );
+      if (!res.ok) throw new Error();
+    } catch {
+      setChecklist((prev) => prev.map((i) => (i.id === item.id ? { ...i, done: !next } : i)));
+    }
+  }
+
   async function saveContent() {
     if (content === savedContent) return;
     setSaving(true);
@@ -99,34 +117,29 @@ export default function Workbench({ tasks }) {
     }
   }
 
-  async function askAI(e) {
-    e.preventDefault();
-    if (!instruction.trim()) return;
-    setDrafting(true);
+  function insertIntoDocument(text) {
+    setContent((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
+  }
+
+  async function runReview() {
+    setReviewing(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/tasks/${encodeURIComponent(taskId)}/document/draft`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction }),
-      });
+      await saveContent();
+      const res = await fetch(
+        `${API_URL}/api/tasks/${encodeURIComponent(taskId)}/document/review`,
+        { method: "POST" }
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || "No se pudo redactar");
+        throw new Error(data.detail || "No se pudo revisar el avance");
       }
-      const data = await res.json();
-      setDraft(data.draft);
+      setReview(await res.json());
     } catch (e) {
       setError(e.message);
     } finally {
-      setDrafting(false);
+      setReviewing(false);
     }
-  }
-
-  function insertDraft() {
-    setContent((prev) => (prev.trim() ? `${prev}\n\n${draft}` : draft));
-    setDraft("");
-    setInstruction("");
   }
 
   async function uploadToDrive() {
@@ -158,7 +171,10 @@ export default function Workbench({ tasks }) {
       <header className="topbar">
         <div>
           <h1>Escritorio</h1>
-          <p className="subtitle">Trabaja una tarea de principio a fin: portada, redacción con IA y PDF listo</p>
+          <p className="subtitle">
+            Trabaja una tarea de principio a fin con el agente: portada, redacción asistida,
+            revisión y PDF listo para subir
+          </p>
         </div>
       </header>
 
@@ -205,17 +221,37 @@ export default function Workbench({ tasks }) {
 
             {checklist.length > 0 && (
               <>
-                <h3 className="workbench-points-title">Puntos a cubrir</h3>
+                <div className="workbench-points-header">
+                  <h3 className="workbench-points-title">
+                    Puntos a cubrir — {checklist.filter((i) => i.done).length} de {checklist.length}
+                  </h3>
+                  <button className="reanalyze-link" onClick={runReview} disabled={reviewing}>
+                    {reviewing ? "Revisando…" : "Revisar mi avance"}
+                  </button>
+                </div>
                 <ul className="checklist">
-                  {checklist.map((item) => (
-                    <li key={item.id} className={item.done ? "done" : ""}>
-                      <label>
-                        <input type="checkbox" checked={item.done} readOnly />
-                        {item.text}
-                      </label>
-                    </li>
-                  ))}
+                  {checklist.map((item) => {
+                    const suggestion = review?.items?.find((r) => r.id === item.id);
+                    return (
+                      <li key={item.id} className={item.done ? "done" : ""}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={item.done}
+                            onChange={() => toggleChecklistItem(item)}
+                          />
+                          {item.text}
+                        </label>
+                        {suggestion && !item.done && (
+                          <span className={`review-badge ${suggestion.covered ? "covered" : "missing"}`}>
+                            {suggestion.covered ? "💡 parece cubierto" : `⚠️ ${suggestion.note || "falta"}`}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
+                {review?.summary && <p className="review-summary">{review.summary}</p>}
               </>
             )}
           </section>
@@ -242,38 +278,25 @@ export default function Workbench({ tasks }) {
             </div>
 
             <h2 className="section-title" style={{ marginTop: 24 }}>
-              Redactar con IA
+              Asistente
             </h2>
-            <form className="workbench-ai-row" onSubmit={askAI}>
-              <input
-                type="text"
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                placeholder="Ej. Explica el método agrega con un ejemplo"
-                disabled={drafting}
-              />
-              <button type="submit" className="sync-btn" disabled={drafting || !instruction.trim()}>
-                {drafting ? "Redactando…" : "Redactar"}
-              </button>
-            </form>
-
-            {draft && (
-              <div className="workbench-draft">
-                <p>{draft}</p>
-                <div className="workbench-draft-actions">
-                  <button className="sync-btn" onClick={insertDraft}>
-                    Insertar en el documento
-                  </button>
-                  <button className="reanalyze-link" onClick={() => setDraft("")}>
-                    Descartar
-                  </button>
-                </div>
-              </div>
-            )}
+            <ChatPanel
+              taskId={task.id}
+              onInsert={insertIntoDocument}
+              quickActions={[
+                {
+                  label: "Redactar lo que falta",
+                  message:
+                    "Redacta un primer borrador que cubra los puntos del checklist que el " +
+                    "contenido actual todavía no cubre, en orden lógico.",
+                },
+              ]}
+            />
 
             <h2 className="section-title" style={{ marginTop: 24 }}>
               Dejar listo para subir
             </h2>
+            {review?.summary && <p className="review-summary">{review.summary}</p>}
             <div className="workbench-actions">
               <a
                 className="reanalyze-link"
