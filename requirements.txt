@@ -1,0 +1,13 @@
+requests>=2.31
+beautifulsoup4>=4.12
+python-dotenv>=1.0
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+openai>=1.50
+pypdf>=4.0
+python-multipart>=0.0.9
+google-auth>=2.50
+google-auth-oauthlib>=1.3
+google-api-python-client>=2.198
+reportlab>=5.0

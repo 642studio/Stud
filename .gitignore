@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.session.json
+tasks_raw.json
+
+# Base de datos local (contiene credenciales de iVirtual y de Google en texto plano)
+estud.db
+
+# Archivos subidos por el usuario (logos, etc.)
+uploads/
+
+# macOS
+.DS_Store
